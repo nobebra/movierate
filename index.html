@@ -1,0 +1,251 @@
+    <script>
+        // Прокси для обхода блокировки TMDB в РФ
+        const PROXY_URL = 'https://api.allorigins.win/raw?url=';
+        
+        // ВАШ КЛЮЧ ВШИТ ПРЯМО В КОД
+        const API_KEY = '1dd11f7a4931848fe0321bff3cf906ba';
+
+        let movies = JSON.parse(localStorage.getItem('myMovies')) || [];
+        let pendingRating = 7;
+
+        // Звёздочки
+        const stars = document.querySelectorAll('.star');
+        const ratingInput = document.getElementById('ratingInput');
+
+        stars.forEach(star => {
+            star.addEventListener('click', function() {
+                const rating = parseInt(this.getAttribute('data-rating'));
+                ratingInput.value = rating;
+                pendingRating = rating;
+                updateStars(rating);
+            });
+        });
+
+        ratingInput.addEventListener('input', function() {
+            let value = parseInt(this.value);
+            if (value < 1) value = 1;
+            if (value > 10) value = 10;
+            pendingRating = value;
+            updateStars(value);
+        });
+
+        function updateStars(rating) {
+            stars.forEach((star, index) => {
+                star.classList.toggle('active', index < rating);
+            });
+        }
+
+        document.getElementById('movieInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') addMovie();
+        });
+
+        async function addMovie() {
+            const title = document.getElementById('movieInput').value.trim();
+            const rating = parseInt(document.getElementById('ratingInput').value);
+
+            if (!title) {
+                showMessage('Введите название фильма');
+                return;
+            }
+
+            if (rating < 1 || rating > 10) {
+                showMessage('Оценка должна быть от 1 до 10');
+                return;
+            }
+
+            const btn = document.getElementById('addBtn');
+            btn.disabled = true;
+            btn.textContent = 'Поиск...';
+
+            try {
+                // Формируем URL для TMDB
+                const targetUrl = `https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&language=ru-RU&query=${encodeURIComponent(title)}`;
+                
+                // Запрос через прокси!
+                const response = await fetch(PROXY_URL + encodeURIComponent(targetUrl));
+                const data = await response.json();
+
+                if (data.results && data.results.length > 0) {
+                    if (data.results.length === 1) {
+                        addMovieToCollection(data.results[0], rating);
+                        document.getElementById('movieInput').value = '';
+                    } else {
+                        showSelectionModal(data.results, rating);
+                    }
+                } else {
+                    showMessage(`Фильм "${title}" не найден. Попробуйте другое название.`);
+                }
+            } catch (error) {
+                showMessage('Ошибка соединения. Проверьте интернет или попробуйте позже.');
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Добавить фильм';
+            }
+        }
+
+        function showSelectionModal(results, rating) {
+            const container = document.getElementById('searchResults');
+            container.innerHTML = '';
+
+            results.slice(0, 6).forEach(movie => {
+                const year = movie.release_date ? movie.release_date.substring(0, 4) : '—';
+                // Постер тоже через прокси
+                const posterUrl = movie.poster_path 
+                    ? PROXY_URL + encodeURIComponent('https://image.tmdb.org/t/p/w300' + movie.poster_path)
+                    : '';
+                
+                const div = document.createElement('div');
+                div.className = 'search-result';
+                div.innerHTML = `
+                    ${posterUrl 
+                        ? `<img src="${posterUrl}" alt="${movie.title}">` 
+                        : `<div style="width:80px;height:120px;background:#444;border-radius:6px;display:flex;align-items:center;justify-content:center">🎬</div>`
+                    }
+                    <div class="search-result-info">
+                        <h3>${movie.title}</h3>
+                        <p>📅 ${year}</p>
+                        <p>⭐ Рейтинг TMDB: ${movie.vote_average ? movie.vote_average.toFixed(1) : 'N/A'}</p>
+                        ${movie.overview ? `<p style="margin-top:8px;font-size:0.85em;color:#ccc">${movie.overview.substring(0, 150)}...</p>` : ''}
+                    </div>
+                `;
+                div.onclick = () => {
+                    addMovieToCollection(movie, rating);
+                    closeModal();
+                    document.getElementById('movieInput').value = '';
+                };
+                container.appendChild(div);
+            });
+
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('active');
+        }
+
+        document.getElementById('modalOverlay').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        function addMovieToCollection(movieData, rating) {
+            const year = movieData.release_date ? movieData.release_date.substring(0, 4) : 'N/A';
+            // Постер через прокси
+            const poster = movieData.poster_path 
+                ? PROXY_URL + encodeURIComponent('https://image.tmdb.org/t/p/w500' + movieData.poster_path)
+                : null;
+            
+            const genres = (movieData.genre_ids || []).slice(0, 3).map(id => getGenreName(id));
+
+            const movie = {
+                id: Date.now(),
+                title: movieData.title,
+                originalTitle: movieData.original_title,
+                year: year,
+                poster: poster,
+                rating: rating,
+                tmdbRating: movieData.vote_average,
+                genres: genres,
+                added: new Date().toISOString()
+            };
+
+            movies.push(movie);
+            saveMovies();
+            renderMovies();
+            showMessage(`✅ "${movie.title}" добавлен!`, 'success');
+        }
+
+        function getGenreName(id) {
+            const genres = {
+                28:'Боевик', 12:'Приключения', 16:'Мультфильм', 35:'Комедия',
+                80:'Криминал', 99:'Документальный', 18:'Драма', 10751:'Семейный',
+                14:'Фэнтези', 36:'История', 27:'Ужасы', 10402:'Музыка',
+                9648:'Детектив', 10749:'Мелодрама', 878:'Фантастика',
+                10770:'ТВ фильм', 53:'Триллер', 10752:'Военный', 37:'Вестерн'
+            };
+            return genres[id] || 'Другое';
+        }
+
+        function deleteMovie(id) {
+            if (confirm('Удалить этот фильм?')) {
+                movies = movies.filter(m => m.id !== id);
+                saveMovies();
+                renderMovies();
+            }
+        }
+
+        function saveMovies() {
+            localStorage.setItem('myMovies', JSON.stringify(movies));
+        }
+
+        function renderMovies() {
+            const grid = document.getElementById('moviesGrid');
+            const countSpan = document.getElementById('movieCount');
+            const avgSpan = document.getElementById('avgRating');
+
+            grid.innerHTML = '';
+            
+            if (movies.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #666; padding: 40px;">Нет добавленных фильмов. Начните с поиска!</div>';
+                countSpan.textContent = '0';
+                avgSpan.textContent = '0';
+                return;
+            }
+
+            const sortedMovies = [...movies].sort((a, b) => new Date(b.added) - new Date(a.added));
+
+            sortedMovies.forEach(movie => {
+                const card = document.createElement('div');
+                card.className = 'movie-card';
+                
+                const starsDisplay = '★'.repeat(movie.rating) + '☆'.repeat(10 - movie.rating);
+                const genresHtml = movie.genres && movie.genres.length > 0
+                    ? `<div class="movie-genres">${movie.genres.map(g => `<span class="genre-tag">${g}</span>`).join('')}</div>`
+                    : '';
+                
+                card.innerHTML = `
+                    ${movie.poster 
+                        ? `<img src="${movie.poster}" alt="${movie.title}" class="movie-poster" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">`
+                        : ''
+                    }
+                    <div class="no-poster" style="display: ${movie.poster ? 'none' : 'flex'}">🎬</div>
+                    <div class="movie-info">
+                        <h3 class="movie-title">${movie.title}</h3>
+                        <div class="movie-meta">
+                            📅 ${movie.year} 
+                            ${movie.tmdbRating ? `| ⭐ TMDB: ${movie.tmdbRating.toFixed(1)}` : ''}
+                        </div>
+                        ${genresHtml}
+                        <div class="movie-rating">
+                            <span class="rating-value">${movie.rating}/10</span>
+                            <span class="rating-stars-display">${starsDisplay}</span>
+                        </div>
+                        <button class="delete-btn" onclick="deleteMovie(${movie.id})">Удалить</button>
+                    </div>
+                `;
+                
+                grid.appendChild(card);
+            });
+
+            countSpan.textContent = movies.length;
+            const avg = (movies.reduce((sum, m) => sum + m.rating, 0) / movies.length).toFixed(1);
+            avgSpan.textContent = avg;
+        }
+
+        function showMessage(message, type = 'error') {
+            const container = document.getElementById('errorContainer');
+            const div = document.createElement('div');
+            div.className = 'error' + (type === 'warning' ? ' warning' : '') + (type === 'success' ? ' warning' : '');
+            if (type === 'success') {
+                div.style.background = 'rgba(76, 175, 80, 0.2)';
+                div.style.color = '#4caf50';
+                div.style.borderColor = 'rgba(76, 175, 80, 0.3)';
+            }
+            div.textContent = message;
+            container.appendChild(div);
+            setTimeout(() => div.remove(), 4000);
+        }
+
+        updateStars(7);
+        renderMovies();
+    </script>
