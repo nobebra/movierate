@@ -235,47 +235,57 @@
         });
 
         async function addMovie() {
-            const title = document.getElementById('movieInput').value.trim();
-            const rating = parseInt(document.getElementById('ratingInput').value);
+    const title = document.getElementById('movieInput').value.trim();
+    const rating = parseInt(document.getElementById('ratingInput').value);
 
-            if (!title) { showMessage('Введите название фильма'); return; }
-            if (rating < 1 || rating > 10) { showMessage('Оценка должна быть от 1 до 10'); return; }
+    if (!title) { showMessage('Введите название фильма'); return; }
+    if (rating < 1 || rating > 10) { showMessage('Оценка должна быть от 1 до 10'); return; }
 
-            const btn = document.getElementById('addBtn');
-            btn.disabled = true;
-            btn.textContent = 'Поиск...';
+    const btn = document.getElementById('addBtn');
+    btn.disabled = true;
+    btn.textContent = 'Поиск...';
 
-            try {
-    const targetUrl = `https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&language=ru-RU&query=${encodeURIComponent(title)}`;
-    
-    // Если PROXY_URL пустая — используем прямой URL
-    const fetchUrl = PROXY_URL ? PROXY_URL + encodeURIComponent(targetUrl) : targetUrl;
-    
-    console.log('Запрос:', fetchUrl);  // Для отладки
-    
-    const response = await fetch(fetchUrl);
-    
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
+    try {
+        // Прямой URL к API без прокси
+        const apiKey = '1dd11f7a4931848fe0321bff3cf906ba';
+        const url = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&language=ru-RU&query=${encodeURIComponent(title)}`;
+        
+        console.log('🎯 Запрос к:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+            }
+        });
+        
+        console.log('📥 Ответ:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('✅ Данные:', data);
 
-    if (data.results && data.results.length > 0) {
-        if (data.results.length === 1) {
-            addMovieToCollection(data.results[0], rating);
-            document.getElementById('movieInput').value = '';
+        if (data.results && data.results.length > 0) {
+            if (data.results.length === 1) {
+                addMovieToCollection(data.results[0], rating);
+                document.getElementById('movieInput').value = '';
+            } else {
+                showSelectionModal(data.results, rating);
+            }
         } else {
-            showSelectionModal(data.results, rating);
+            showMessage(`Фильм "${title}" не найден`);
         }
-    } else {
-        showMessage(`Фильм "${title}" не найден`);
+    } catch (error) {
+        console.error('❌ Ошибка:', error);
+        showMessage('Ошибка соединения: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Добавить фильм';
     }
-} catch (error) {
-    console.error('Ошибка:', error);
-    showMessage('Ошибка: ' + error.message);
 }
-        }
 
         function showSelectionModal(results, rating) {
             const container = document.getElementById('searchResults');
